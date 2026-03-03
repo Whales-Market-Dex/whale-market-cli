@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "CLI for Whales Market trading platform",
   "bin": {
-    "whales": "./bin/whales"
+    "whales": "bin/whales"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,13 +18,23 @@
     "test": "jest",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["whales", "market", "cli", "trading", "crypto", "blockchain", "defi", "solana", "ethereum"],
+  "keywords": [
+    "whales",
+    "market",
+    "cli",
+    "trading",
+    "crypto",
+    "blockchain",
+    "defi",
+    "solana",
+    "ethereum"
+  ],
   "license": "MIT",
   "author": "Whale Market",
   "homepage": "https://whales.market",
   "repository": {
     "type": "git",
-    "url": "https://github.com/whalemarketdev/whale-market-cli.git"
+    "url": "git+https://github.com/whalemarketdev/whale-market-cli.git"
   },
   "bugs": {
     "url": "https://github.com/whalemarketdev/whale-market-cli/issues"
