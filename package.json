@@ -1,0 +1,51 @@
+{
+  "name": "whale-market-cli",
+  "version": "0.1.0",
+  "description": "CLI for Whales Market trading platform",
+  "bin": {
+    "whales": "./bin/whales"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["whales", "market", "cli", "trading", "crypto"],
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "axios": "^1.7.0",
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.5",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1",
+    "dotenv": "^16.4.0",
+    "@solana/web3.js": "^1.95.0",
+    "@solana/spl-token": "^0.3.9",
+    "ethers": "^6.13.0",
+    "tweetnacl": "^1.0.3",
+    "bs58": "^5.0.0",
+    "bip39": "^3.1.0",
+    "conf": "^10.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/inquirer": "^8.2.10",
+    "typescript": "^5.5.0",
+    "ts-node": "^10.9.2",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.12",
+    "ts-jest": "^29.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

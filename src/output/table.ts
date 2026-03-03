@@ -1,0 +1,263 @@
+import Table from 'cli-table3';
+import chalk from 'chalk';
+import { Token } from '../types';
+
+// Utility functions
+export function truncate(str: string, max: number): string {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
+
+export function formatStatus(status: string): string {
+  const colors: Record<string, (text: string) => string> = {
+    active: chalk.green,
+    ended: chalk.gray,
+    pending: chalk.yellow,
+    open: chalk.green,
+    filled: chalk.blue,
+    cancelled: chalk.red,
+    closed: chalk.gray
+  };
+  return (colors[status.toLowerCase()] || chalk.white)(status);
+}
+
+export function formatPrice(price: string | number | undefined): string {
+  if (price === null || price === undefined) return '-';
+  const num = parseFloat(price.toString());
+  if (isNaN(num) || num === 0) return '-';
+  if (num >= 1e6) return `$${(num / 1e6).toFixed(1)}M`;
+  if (num >= 1e3) return `$${(num / 1e3).toFixed(1)}K`;
+  return `$${num.toFixed(2)}`;
+}
+
+export function getChainName(chainId: number | string | undefined, network?: any): string {
+  let chainName = '';
+  let chainIdNum: number | undefined;
+  
+  // If network object is provided, use its name and chain_id
+  if (network) {
+    chainName = network.name || '';
+    chainIdNum = network.chain_id;
+  }
+  
+  // If no network name but we have chainId, try to map it
+  if (!chainName && chainId) {
+    const numId = typeof chainId === 'string' ? parseInt(chainId, 10) : chainId;
+    if (!isNaN(numId)) {
+      chainIdNum = numId;
+      const chains: Record<number, string> = {
+        666666: 'Solana',
+        999999: 'Solana Devnet',
+        1: 'Ethereum',
+        56: 'BSC',
+        137: 'Polygon',
+        42161: 'Arbitrum',
+        10: 'Optimism',
+        8453: 'Base',
+        324: 'zkSync Era',
+        59144: 'Linea',
+        5000: 'Mantle',
+        169: 'Manta Pacific'
+      };
+      chainName = chains[numId] || `Chain ${numId}`;
+    }
+  }
+  
+  // Format as "ChainName(chainId)" if both are available
+  if (chainName && chainIdNum !== undefined) {
+    return `${chainName}(${chainIdNum})`;
+  }
+  
+  // Fallback to just chain name or chain ID
+  if (chainName) return chainName;
+  if (chainIdNum !== undefined) return `Chain(${chainIdNum})`;
+  
+  return '-';
+}
+
+// Table formatters
+export function printTokensTable(tokens: any[]): void {
+  if (!tokens || tokens.length === 0) {
+    console.log('No tokens found');
+    return;
+  }
+  
+  const table = new Table({
+    head: [
+      chalk.cyan('ID'),
+      chalk.cyan('Name'),
+      chalk.cyan('Symbol'),
+      chalk.cyan('Status'),
+      chalk.cyan('Price'),
+      chalk.cyan('Last Price'),
+      chalk.cyan('Chain'),
+      chalk.cyan('Token ID/Address'),
+      chalk.cyan('Type')
+    ],
+    colWidths: [38, 20, 10, 10, 12, 12, 18, 50, 12],
+    style: {
+      head: [],
+      border: []
+    }
+  });
+  
+  tokens.forEach((token: any) => {
+    // Extract network name from network object or network_id
+    const networkName = getChainName(token.chain_id || token.network_id, token.network);
+    
+    // Price display - prefer last_price if price is 0
+    const priceValue = (token.price && parseFloat(token.price.toString()) > 0) ? token.price : token.last_price;
+    const displayPrice = formatPrice(priceValue);
+    const displayLastPrice = formatPrice(token.last_price);
+    
+    // Format addresses - show token_id (for orders) or address/pre_token_address
+    // Show full addresses for agent analysis
+    const tokenId = token.token_id || '-';
+    const address = token.address || token.pre_token_address || '-';
+    // Show full address/token_id (up to 50 chars fits in column)
+    const displayAddress = address !== '-' ? (address.length > 50 ? address.substring(0, 47) + '...' : address) : (tokenId !== '-' ? (tokenId.length > 50 ? tokenId.substring(0, 47) + '...' : tokenId) : '-');
+    
+    table.push([
+      token.id || '-',  // Full UUID ID
+      truncate(token.name || '-', 23),
+      token.symbol || '-',
+      formatStatus(token.status || 'unknown'),
+      displayPrice,
+      displayLastPrice,
+      networkName,
+      displayAddress,
+      token.type || token.category || '-'
+    ]);
+  });
+  
+  console.log(table.toString());
+}
+
+// Detailed table formatter with full addresses and more fields
+export function printTokensTableDetailed(tokens: any[]): void {
+  if (!tokens || tokens.length === 0) {
+    console.log('No tokens found');
+    return;
+  }
+  
+  tokens.forEach((token: any, index: number) => {
+    if (index > 0) console.log('\n' + '='.repeat(100) + '\n');
+    
+    const networkName = getChainName(token.chain_id || token.network_id, token.network);
+    const priceValue = (token.price && parseFloat(token.price.toString()) > 0) ? token.price : token.last_price;
+    
+    printDetailTable([
+      ['ID', token.id || '-'],
+      ['Name', token.name || '-'],
+      ['Symbol', token.symbol || '-'],
+      ['Status', token.status || '-'],
+      ['Price', formatPrice(priceValue)],
+      ['Last Price', formatPrice(token.last_price)],
+      ['Chain', networkName],
+      ['Token ID', token.token_id || '-'],
+      ['Address', token.address || '-'],
+      ['Pre Token Address', token.pre_token_address || '-'],
+      ['Type', token.type || '-'],
+      ['Category', token.category || '-'],
+      ['Short ID', token.short_id || '-'],
+      ['Network ID', token.network_id || '-'],
+      ['Decimals', token.decimals || '-'],
+      ['Settle Rate', token.settle_rate || '-'],
+      ['Total Volume Ask', token.total_volume_ask ? `$${parseFloat(token.total_volume_ask.toString()).toFixed(2)}` : '-'],
+      ['Total Volume Bid', token.total_volume_bid ? `$${parseFloat(token.total_volume_bid.toString()).toFixed(2)}` : '-'],
+      ['Average Bid', formatPrice(token.average_bid)],
+      ['Average Ask', formatPrice(token.average_ask)]
+    ]);
+  });
+}
+
+export function printOffersTable(offers: any[]): void {
+  const table = new Table({
+    head: [
+      chalk.cyan('ID'),
+      chalk.cyan('Type'),
+      chalk.cyan('Token ID'),
+      chalk.cyan('Amount'),
+      chalk.cyan('Price'),
+      chalk.cyan('Status'),
+      chalk.cyan('Address')
+    ],
+    colWidths: [8, 8, 10, 15, 12, 10, 20]
+  });
+  
+  offers.forEach((offer: any) => {
+    table.push([
+      offer.id || '-',
+      offer.type || '-',
+      offer.token_id || '-',
+      offer.amount || '-',
+      formatPrice(offer.price),
+      formatStatus(offer.status || 'unknown'),
+      truncate(offer.address || '-', 18)
+    ]);
+  });
+  
+  console.log(table.toString());
+}
+
+export function printOrdersTable(orders: any[]): void {
+  const table = new Table({
+    head: [
+      chalk.cyan('ID'),
+      chalk.cyan('Offer ID'),
+      chalk.cyan('Buyer'),
+      chalk.cyan('Seller'),
+      chalk.cyan('Amount'),
+      chalk.cyan('Status')
+    ],
+    colWidths: [8, 10, 20, 20, 15, 12]
+  });
+  
+  orders.forEach((order: any) => {
+    table.push([
+      order.id || '-',
+      order.offer_id || '-',
+      truncate(order.buyer_address || '-', 18),
+      truncate(order.seller_address || '-', 18),
+      order.amount || '-',
+      formatStatus(order.status || 'unknown')
+    ]);
+  });
+  
+  console.log(table.toString());
+}
+
+export function printDetailTable(rows: Array<[string, string]>): void {
+  const table = new Table({
+    colWidths: [20, 50]
+  });
+  
+  rows.forEach(([key, value]) => {
+    table.push([chalk.cyan(key), value]);
+  });
+  
+  console.log(table.toString());
+}
+
+export function printNetworksTable(networks: any[]): void {
+  const table = new Table({
+    head: [
+      chalk.cyan('ID'),
+      chalk.cyan('Name'),
+      chalk.cyan('Chain ID'),
+      chalk.cyan('RPC URL')
+    ],
+    colWidths: [8, 20, 12, 40]
+  });
+  
+  networks.forEach((network: any) => {
+    table.push([
+      network.id || '-',
+      network.name || '-',
+      network.chain_id || '-',
+      truncate(network.rpc_url || '-', 38)
+    ]);
+  });
+  
+  console.log(table.toString());
+}
