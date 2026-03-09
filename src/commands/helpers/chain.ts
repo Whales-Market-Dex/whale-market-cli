@@ -155,7 +155,7 @@ export function getPreMarket(
     const connection = new Connection(rpcUrl, 'confirmed');
     const keypair = deriveSolanaKeypair(trimmed);
     const isMainnet = chainId === SOLANA_MAINNET_CHAIN_ID;
-    return new SolanaPreMarket(connection, keypair, isMainnet);
+    return new SolanaPreMarket(connection, keypair, isMainnet, apiUrl);
   }
 
   if (type === 'sui') {

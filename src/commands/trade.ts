@@ -383,7 +383,11 @@ tradeCommand
           });
         }
       } else if (isSolanaChain(chainId)) {
-        tx = await (preMarket as any).settleOrder(orderId as number);
+        if (options.withDiscount) {
+          tx = await (preMarket as any).settleOrderWithDiscount({ orderId: orderId as number });
+        } else {
+          tx = await (preMarket as any).settleOrder(orderId as number);
+        }
       } else if (isSuiChain(chainId)) {
         if (options.withDiscount && options.orderUuid) {
           const orderRes = await apiClient.getOrder(orderIdArg);
@@ -464,7 +468,11 @@ tradeCommand
           tx = await (preMarket as any).cancelOrder(orderId as number);
         }
       } else if (isSolanaChain(chainId)) {
-        tx = await (preMarket as any).cancelOrder(orderId as number);
+        if (options.withDiscount) {
+          tx = await (preMarket as any).cancelOrderWithDiscount({ orderId: orderId as number });
+        } else {
+          tx = await (preMarket as any).cancelOrder(orderId as number);
+        }
       } else if (isSuiChain(chainId)) {
         tx = await (preMarket as any).cancelOrder(orderId as string);
       } else if (isAptosChain(chainId)) {
