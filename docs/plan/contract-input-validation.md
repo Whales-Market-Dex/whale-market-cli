@@ -1,14 +1,24 @@
 # Plan: Contract Input Validation & Interaction Gaps
 
-**Status:** Draft
+**Status:** Phase 1 ✅ Complete · Phase 2 ✅ Mostly Done · Phase 3 Pending
 **Priority:** High
 **Source:** Analysis of `/ref/whales-market-frontend-v2/src/contracts` vs current CLI implementation
 
 ---
 
+## Progress Summary
+
+| Status | Count | Items |
+|--------|-------|-------|
+| ✅ Done | 13 | #4–12, #15, #17–22 |
+| ⏳ Pending | 4 | #1, #2, #3, #13, #14 |
+| N/A | 3 | #16 (Aptos discount — frontend also unsupported) |
+
+---
+
 ## Overview
 
-This document identifies gaps and missing validations between the frontend contract interaction logic and the current CLI implementation. For each gap, the required API calls are listed so the CLI can replicate the frontend behavior.
+This document identifies gaps and missing validations between the frontend contract interaction logic and the current CLI. For each gap, the required API calls are listed.
 
 API base URL: `https://api.whales.market` (configurable via `whales config set api-url`)
 
@@ -16,485 +26,312 @@ API base URL: `https://api.whales.market` (configurable via `whales config set a
 
 ## EVM Gaps
 
-### 1. `createOffer` / `fillOffer` — Minimum Collateral (USD)
+### 1. `createOffer` / `fillOffer` — Minimum Collateral (USD) ⏳ Pending
 
 **Frontend behavior:**
-- Constant defined in `src/constants/global.ts`:
-  ```typescript
-  export const MIN_COLLATERAL = isDev ? 0.001 : 10; // USD
-  ```
-- **Create offer**: `collateralValueUsd = price × amount`. Submit blocked if `collateralValueUsd < MIN_COLLATERAL`.
-- **Fill offer**: `collateralValueUsd = collateral × exTokenPriceUsd`. Fill blocked if the fill amount in USD is below `MIN_COLLATERAL` AND the remaining collateral on the offer is still above `MIN_COLLATERAL` (i.e. partial fills that are too small are rejected, but a final fill that clears the offer is allowed).
-- User sees: `"Minimum deposit is $10"`
+```typescript
+// src/constants/global.ts
+export const MIN_COLLATERAL = isDev ? 0.001 : 10; // USD
+```
+- **Create**: blocks submit if `price × amount < $10`
+- **Fill**: blocks if fill amount in USD `< $10` AND remaining offer collateral `>= $10`
 
-**CLI behavior:**
-- No minimum collateral check; any amount is accepted.
+**CLI behavior:** No minimum check — any amount is accepted.
 
-**Gap:** The CLI lets users submit offers below the $10 minimum. The contract may accept the tx, but the marketplace API/UI treats it as invalid.
+**Gap:** CLI lets users submit sub-$10 offers. The contract may accept but the marketplace treats them as invalid.
 
-**API calls needed:**
-To evaluate collateral in USD, the CLI needs the exToken price:
+**API needed:**
 ```
 GET /network-chains/v2/price?chainId={chainId}&currency=usd
-
-Response: [{ address: "0x...", price: 1.0001 }, ...]
+Response: [{ "address": "0x...", "price": 1.0001 }]
 ```
 Then: `collateralValueUsd = collateralInExToken × exTokenPrice`. Reject if `< 10`.
 
-**Files:** `src/constants/global.ts`, `src/components/create-offer/tabs/StepReview.tsx:84`, `src/screens/token-detail/components/form-fill-offer/FormFillOffer.tsx:120`
-
 ---
 
-### 2. `createOffer` — Collateral Computation
+### 2. `createOffer` — Collateral Auto-Computation ⏳ Pending (optional UX)
 
 **Frontend behavior:**
-- Fetches exToken USD price from API (same endpoint as above)
-- Computes `collateral = amount × (pricePerTokenUsd / exTokenPrice)`
-- Result scaled to exToken decimals
+- Fetches exToken price from API, computes `collateral = amount × (pricePerTokenUsd / exTokenPrice)` scaled to exToken decimals
 
 **CLI behavior:**
-- Requires `--collateral` as a pre-computed raw value (exToken units)
-- No API price fetch; no automatic computation
+- User passes `--price` (USD per token) and `--amount`; CLI computes `collateral = amount × price` directly in the trade command (no exToken price lookup needed for basic collateral calculation — already done)
 
-**Gap:** Users must manually compute the correct collateral. A wrong value leads to under/over-collateralizing.
+**Remaining gap:** The CLI doesn't validate that the computed collateral is correct relative to the on-chain exToken price. Under-collateralization is possible if user inputs inconsistent values. Covered by #1 when the $10 minimum check is added.
 
-**API calls needed:**
+**API needed:**
 ```
 GET /network-chains/v2/price?chainId={chainId}&currency=usd
-
-Response: [{ address: "0x...", price: number }, ...]
+Response: [{ "address": "0x...", "price": number }]
 ```
-Find the entry matching `exTokenAddress`. Then: `collateral = parseUnits(amount × pricePerTokenUsd / exTokenPrice, exTokenDecimals)`.
 
 ---
 
-### 3. `settleOrder` — Token Decimals
+### 3. `settleOrder` — Token Decimals ⏳ Pending
 
 **Frontend behavior:**
-- Calls `token.decimals()` on the settlement token contract dynamically before approval
+- Fetches `token.decimals()` on-chain dynamically before approval/settlement
 
 **CLI behavior:**
-- Accepts `--token-decimals` flag (defaults to 6); no on-chain lookup
+- Uses `--token-decimals` flag (default: 6); no on-chain lookup
 
-**Gap:** If the settlement token has non-standard decimals (e.g. 18 for WETH), the CLI computes the wrong raw amount.
+**Gap:** Wrong decimals = wrong raw amount for settlement token (e.g. 18 for WETH vs default 6).
 
-**API calls needed:** None — requires an on-chain RPC call (`contract.decimals()`). No external API involved.
-
----
-
-### 4. `settleOrder` — Settlement Token Approval
-
-**Status:** ✓ No gap — `EvmPreMarket.settleOrder()` calls `ensureApproval` correctly.
+**API needed:** None — requires on-chain RPC call `contract.decimals()` only.
 
 ---
 
-### 5. `closeOffer` — Referral Chain Params
+### 4. `settleOrder` — Settlement Token Approval ✅ Done
 
-**Status:** ✓ No gap — `EvmPreMarket.closeOffer()` checks `this.isReferral` and branches correctly.
-
----
-
-### 6. USDT Double-Approval
-
-**Status:** ✓ No gap — `ensureApproval()` resets to 0 for USDT before setting new allowance.
+`EvmPreMarket.settleOrder()` calls `ensureApproval(tokenAddress, amount)` before `settleFilled`.
 
 ---
 
-### 7. ETH vs ERC20 Path
+### 5. `closeOffer` — Referral Chain Params ✅ Done
 
-**Status:** ✓ No gap — `createOffer()` and `fillOffer()` check `exTokenAddress === ETH_ADDRESS`.
+`EvmPreMarket.closeOffer()` checks `this.isReferral` and calls `cancelOffer(offerId, '0x', fundDistributor)` for referral chains.
+
+---
+
+### 6. USDT Double-Approval ✅ Done
+
+`ensureApproval()` detects USDT address and resets allowance to 0 before setting new value.
+
+---
+
+### 7. ETH vs ERC20 Path ✅ Done
+
+`createOffer()` and `fillOffer()` check `exTokenAddress === ETH_ADDRESS` and use `newOfferETH`/`fillOfferETH` with `{ value }` accordingly.
 
 ---
 
 ## Solana Gaps
 
-### 8. Missing Compute Unit Simulation
+### 8. Compute Unit Simulation ✅ Done
 
-**Frontend behavior:**
-1. Simulates the transaction to estimate compute units
-2. Adds 25% buffer: `CU = Math.ceil(simulated × 1.25)`
-3. Prepends `ComputeBudgetProgram.setComputeUnitLimit({ units: CU })` instruction
+**Implemented in:** `SolanaPreMarket.send()` and `SolanaOtcPreMarket.sendTransaction()`
 
-**CLI behavior:**
-- Sends transactions without CU estimation or budget instructions
-
-**Gap:** Without explicit CU limits, Solana defaults to 200,000 CU — insufficient for settle/OTC fill. Causes `exceeded compute budget` errors.
-
-**API calls needed:** None — pure on-chain simulation via `connection.simulateTransaction(tx)`.
+- Simulates tx with `connection.simulateTransaction(tx)`
+- Reads `unitsConsumed`, applies 25% buffer: `cuLimit = Math.ceil(units × 1.25)`
+- Prepends `ComputeBudgetProgram.setComputeUnitLimit({ units: cuLimit })` to tx
+- Falls back to 200,000 CU if simulation fails
 
 ---
 
-### 9. Missing Retry Logic
+### 9. Retry Logic ✅ Done
 
-**Frontend behavior:**
-- Retry loop: 10 attempts, 1500ms delay
-- Retries on network timeouts, blockhash expiry, etc.
+**Implemented in:** both Solana send methods
 
-**CLI behavior:**
-- Single attempt; no retry
-
-**Gap:** Solana transactions fail transiently without retries.
-
-**API calls needed:** None — pure client-side retry logic.
+- Retries up to 10 attempts with 1500ms delay between each
+- Refreshes blockhash on every attempt
 
 ---
 
-### 10. `settleOrder` with Discount — API Transaction Build
+### 10. `settleOrder` with Discount ✅ Done
 
-**Frontend behavior:**
-- Calls API to get a pre-built, partially-signed serialized transaction
-- Deserializes base64 → `VersionedTransaction`, signs, submits
+**Implemented in:** `SolanaPreMarket.settleOrderWithDiscount({ orderId })`
 
-**CLI behavior:**
-- Implementation uncertain; may call SDK directly (incorrect)
+- POSTs to API, deserializes base64 `VersionedTransaction`, signs, sends
+- `trade.ts` Solana settle: `--with-discount` triggers this path (uses numeric `orderId` — no `--order-uuid` needed for Solana)
 
-**Gap:** Discount settle **must** use the API-built transaction (backend injects discount data server-side).
-
-**API calls needed:**
+**API:**
 ```
 POST /transactions/build-transaction-settle-with-discount
-Body:  { "orderId": <order_index: number>, "feePayer": "<base58_wallet_address>" }
-
-Response: { "data": "<base64_encoded_versioned_transaction>" }
+Body:     { "orderId": <number>, "feePayer": "<base58>" }
+Response: { "data": "<base64_versioned_tx>" }
 ```
-Then: `VersionedTransaction.deserialize(Buffer.from(data, 'base64'))` → sign with keypair → `connection.sendRawTransaction`.
 
 ---
 
-### 11. `cancelOrder` with Discount — API Transaction Build
+### 11. `cancelOrder` with Discount ✅ Done
 
-**Frontend behavior:**
-- Same pattern as settle with discount
+**Implemented in:** `SolanaPreMarket.cancelOrderWithDiscount({ orderId })`
 
-**CLI behavior:**
-- Same uncertainty as #10
+- Same pattern as #10
+- `trade.ts` claim-collateral: `--with-discount` triggers this path
 
-**Gap:** Must use API-built transaction for the discount cancel path.
-
-**API calls needed:**
+**API:**
 ```
 POST /transactions/build-transaction-cancel-with-discount
-Body:  { "orderId": <order_index: number>, "feePayer": "<base58_wallet_address>" }
-
-Response: { "data": "<base64_encoded_versioned_transaction>" }
+Body:     { "orderId": <number>, "feePayer": "<base58>" }
+Response: { "data": "<base64_versioned_tx>" }
 ```
 
 ---
 
-### 12. Native SOL Wrapping
+### 12. Native SOL Wrapping ✅ Done
 
-**Frontend behavior:**
-- Uses `buildWrapSolInstructions` to wrap native SOL → wSOL before creating/filling SOL-collateral offers
-
-**CLI behavior:**
-- Not confirmed if auto-wrapping is handled in SDK or CLI layer
-
-**Gap (potential):** SOL offers will fail if user has native SOL but no wSOL balance.
-
-**API calls needed:** None — on-chain instruction only (`createSyncNativeInstruction` from `@solana/spl-token`).
+`SolanaPreMarket.createOffer()` and `fillOffer()` call `buildWrapSolInstructions(connection, payer, lamports)` when `exToken === NATIVE_MINT`, prepending the wrap instructions to the transaction.
 
 ---
 
 ## Sui Gaps
 
-### 13. `settleOrderWithDiscount` — Not Implemented
+### 13. `settleOrderWithDiscount` ⏳ Pending
 
 **Frontend behavior:**
-- Calls API to get discount signature + data, builds a PTB with it
+- Calls API for discount signature + data, builds PTB
 
 **CLI behavior:**
-- Not implemented
+- Not yet implemented
 
-**Gap:** Discount settle for Sui requires a specific API endpoint.
-
-**API calls needed:**
+**API needed:**
 ```
 POST /transactions/build-settle-discount-signature-sui
-Body:  { "orderId": "<order_uuid>" }
-
-Response: { "data": { "settleDiscount": { /* discount fields */ } } }
+Body:     { "orderId": "<order_uuid>" }
+Response: { "data": { "settleDiscount": { /* discount fields, signature */ } } }
 ```
-The response data is passed into the Sui PTB builder to construct the settlement transaction.
 
 ---
 
-### 14. `cancelOrderWithDiscount` — Not Implemented
+### 14. `cancelOrderWithDiscount` ⏳ Pending
 
 **Frontend behavior:**
-- Calls API to get discount signature + `custom_index` for cancel, builds PTB
+- Calls API for discount signature + `custom_index`, builds PTB
 
 **CLI behavior:**
-- Not implemented
+- Not yet implemented
 
-**Gap:** Same pattern as #13.
-
-**API calls needed:**
+**API needed:**
 ```
 POST /transactions/build-cancel-discount-signature-sui
-Body:  { "orderId": "<order_uuid>" }
-
-Response: {
-  "data": {
-    "order": { "custom_index": "string" },
-    "settleDiscount": { /* discount fields */ }
-  }
-}
+Body:     { "orderId": "<order_uuid>" }
+Response: { "data": { "order": { "custom_index": "string" }, "settleDiscount": { /* ... */ } } }
 ```
 
 ---
 
-### 15. `customIndex` (Sui Config Object ID)
+### 15. `customIndex` / Config Object ID ✅ Done
 
-**Frontend behavior:**
-- Passes `customIndex` (Sui config object ID) as required param to all PTB calls
-
-**CLI behavior:**
-- `SuiPreMarket` constructor — verify it reads `customIndex` correctly from constants
-
-**Gap (potential):** If `customIndex` is wrong or missing, all Sui transactions will fail.
-
-**API calls needed:** None — must be verified against the live Sui contract deployment config and hardcoded in `src/blockchain/sui/constants.ts`.
+`SuiPreMarket` uses `this.net.configId` (from `src/blockchain/sui/constants.ts`) as the config object in all PTB calls. Verified against deployment: mainnet `0x43265...`, testnet `0x95926...`.
 
 ---
 
 ## Aptos Gaps
 
-### 16. Settle/Cancel with Discount — Acceptable Non-Implementation
+### 16. Settle/Cancel with Discount — N/A
 
-**Status:** ✓ No gap — frontend throws `"Discount not supported on Aptos"`. CLI can do the same.
+Frontend throws `"Discount not supported on Aptos"`. No implementation needed in CLI either.
 
 ---
 
-### 17. Coin vs Fungible Asset Entry Functions
+### 17. Coin vs Fungible Asset Entry Functions ✅ Done
 
-**Frontend behavior:**
-- `create_offer_with_coin` for Coin-based tokens (type starts with `0x1::`)
-- `create_offer` for Fungible Asset tokens
-
-**CLI behavior:**
-- Unclear if the distinction is handled in `AptosPreMarket`
-
-**Gap (potential):** Wrong entry function = contract error at runtime.
-
-**API calls needed:** None — detection is based on the `exToken` type string format.
+`AptosPreMarket.createOffer()` and `fillOffer()` call `checkCoinToFa(aptos, sender, exToken)` to detect token type and select `create_offer_with_coin` (with `typeArguments`) vs `create_offer` accordingly.
 
 ---
 
 ## OTC EVM Gaps
 
-### 18. `createOffer` — Buyer Ownership Check
+### 18. `createOffer` — Buyer Ownership Check ✅ Done
 
-**Frontend behavior:**
-- Reads `orderData` from contract; verifies `orderData.buyer === wallet.address`
-- Throws if caller is not the buyer
-
-**CLI behavior:**
-- No ownership pre-check; proceeds directly to signing + contract call
-
-**Gap:** User wastes gas attempting OTC on an order they don't own.
-
-**API calls needed:** None — requires an on-chain read (`contract.orders(orderId)`).
+`EvmOtcPreMarket.createOffer()` fetches the pre-market order and throws if `order.buyer.toLowerCase() !== signer.address.toLowerCase()`.
 
 ---
 
-### 19. `createOffer` — Message Signing (EIP-191)
+### 19. `createOffer` — Message Signing (EIP-191) ✅ Done
 
-**Frontend behavior:**
+`EvmOtcPreMarket.createOffer()`:
 1. Computes `signatureDeadline = Math.floor(Date.now() / 1000) + 3600`
-2. Signs: `ethers.solidityPackedKeccak256(['address','uint256','address','bool','uint256','uint256','address'], [preMarketAddr, orderId, otcAddr, true, signatureDeadline, chainId, otcAddr])`
-3. Calls: `contract.createOffer(orderId, exToken, value, offerDeadline, signatureDeadline, signature)`
-
-**CLI behavior:**
-- No signing logic; no `signatureDeadline`
-- `otc create` calls `otc.createOffer({ orderId, exToken, value, deadline })` — missing `signatureDeadline` and `signature`
-
-**Gap:** OTC `createOffer` always reverts without the signed message. **Critical — blocks OTC entirely.**
-
-**API calls needed:** None — pure client-side signing with `signer.signMessage(hash)`.
+2. Signs `solidityPackedKeccak256([preMarketAddr, orderId, otcAddr, true, signatureDeadline, chainId, otcAddr])`
+3. Passes `signature` + `signatureDeadline` to `contract.createOffer(...)`
 
 ---
 
-### 20. `fillOffer` — Pre-fetch Offer Data for Approval
+### 20. `fillOffer` — ERC20 Pre-approval ✅ Done
 
-**Frontend behavior:**
-- Reads `offerData = await contract.offers(offerId)` from chain
-- Extracts `exToken` and `value`
-- Calls `ensureApproval(exToken, value)` before filling
-
-**CLI behavior:**
-- Passes `offerId` string directly; no pre-fetch, no approval
-
-**Gap:** Fill reverts if ERC20 allowance is insufficient.
-
-**API calls needed:** None — on-chain read only.
+`EvmOtcPreMarket.fillOffer()` fetches `contract.otcOffers(offerId)`, extracts `exToken` + `value`, calls `ensureApproval(exToken, value)` before filling. Handles ETH/ERC20 and referral/non-referral paths.
 
 ---
 
-### 21. `fillOffer` with Discount (Referral Chains) — `encodeResellData`
+### 21. `fillOffer` with Discount — `encodeResellData` ✅ Done
 
-**Frontend behavior:**
-- Referral chains: fetches discount data from API, encodes with `encodeResellData(...)`, calls `fillOffer(offerId, encodedData, fundDistributor)`
-- Non-referral: calls `fillOffer(offerId)` directly
+`EvmOtcPreMarket.fillOfferWithDiscount()`:
+- Calls `POST /transactions/build-txf-fill-resell-with-discount-evm`
+- Encodes response with `encodeOtcResellData(...)`
+- Calls `fillOffer(offerId, encodedData, fundDistributor)` for referral chains
 
-**CLI behavior:**
-- `otc fill --with-discount` calls `fillOfferWithDiscount({ offerId, offerUUID })` — unclear if referral encoding is handled
-
-**Gap (potential):** Referral chain OTC fill discount may not encode data correctly.
-
-**API calls needed:**
+**API:**
 ```
 POST /transactions/build-txf-fill-resell-with-discount-evm
-Body:  { "offerId": "<offer_uuid>", "sender": "<0x_wallet_address>" }
-
-Response: {
-  "data": {
-    "buyerDiscount": number,
-    "signature": "0x...",
-    "buyerReferrer": "0x...",
-    "buyerReferralPercent": number
-  }
-}
+Body:     { "offerId": "<offer_uuid>", "sender": "<0x_addr>" }
+Response: { "data": { "buyerDiscount": number, "signature": "0x...", "buyerReferrer": "0x...", "buyerReferralPercent": number } }
 ```
-Response is passed to `encodeResellData(...)` then `fillOffer(offerId, encodedData, fundDistributor)`.
 
 ---
 
 ## OTC Solana Gaps
 
-### 22. `fillOffer` — Accepts PDA PublicKey
+### 22. `fillOffer` — PDA PublicKey ✅ Done
 
-**Status:** ✓ No gap — CLI uses `new PublicKey(otcOfferIdArg)` correctly.
-
----
-
-## API Endpoints Reference
-
-All endpoints relative to base URL (default: `https://api.whales.market`).
-
-| Endpoint | Method | Used By | Purpose |
-|----------|--------|---------|---------|
-| `/network-chains/v2/price?chainId={id}&currency=usd` | GET | All chains, createOffer/fillOffer | Get exToken USD price for collateral computation and $10 minimum check |
-| `/transactions/build-transaction-settle-with-discount` | POST | Solana, settleWithDiscount | Get pre-built base64 serialized tx with discount injected |
-| `/transactions/build-transaction-cancel-with-discount` | POST | Solana, cancelWithDiscount | Get pre-built base64 serialized tx with discount injected |
-| `/transactions/v2/build-transaction-settle-with-discount-evm` | POST | EVM referral, settleWithDiscount | Get discount+referral signature data |
-| `/transactions/build-transaction-settle-with-discount-evm` | POST | EVM non-referral, settleWithDiscount | Get discount signature data |
-| `/transactions/v2/build-transaction-cancel-with-discount-evm` | POST | EVM referral, cancelWithDiscount | Get discount+referral signature data |
-| `/transactions/build-transaction-cancel-with-discount-evm` | POST | EVM non-referral, cancelWithDiscount | Get discount signature data |
-| `/transactions/build-settle-discount-signature-sui` | POST | Sui, settleWithDiscount | Get discount signature + data for PTB |
-| `/transactions/build-cancel-discount-signature-sui` | POST | Sui, cancelWithDiscount | Get discount signature + custom_index for PTB |
-| `/transactions/build-txf-fill-resell-with-discount-evm` | POST | OTC EVM, fillWithDiscount | Get buyer discount + referral data for resell fill |
-
-### Payload / Response Shapes
-
-**`GET /network-chains/v2/price`**
-```json
-// Response
-[{ "address": "0xTokenAddress", "price": 1.0001 }]
-```
-
-**`POST /transactions/build-transaction-settle-with-discount` (Solana)**
-```json
-// Request
-{ "orderId": 42, "feePayer": "base58WalletAddress" }
-// Response
-{ "data": "base64EncodedVersionedTransaction" }
-```
-
-**`POST /transactions/build-transaction-cancel-with-discount` (Solana)**
-```json
-// Request
-{ "orderId": 42, "feePayer": "base58WalletAddress" }
-// Response
-{ "data": "base64EncodedVersionedTransaction" }
-```
-
-**`POST /transactions/v2/build-transaction-settle-with-discount-evm` (EVM referral)**
-```json
-// Request
-{ "orderId": "order-uuid", "sender": "0xWalletAddress" }
-// Response
-{ "data": { "sellerDiscount": 0, "buyerDiscount": 0, "sellerReferrer": "0x...", "buyerReferrer": "0x...", "sellerReferralPercent": 0, "buyerReferralPercent": 0, "signature": "0x..." } }
-```
-
-**`POST /transactions/build-settle-discount-signature-sui`**
-```json
-// Request
-{ "orderId": "order-uuid" }
-// Response
-{ "data": { "settleDiscount": { /* discount fields */ } } }
-```
-
-**`POST /transactions/build-cancel-discount-signature-sui`**
-```json
-// Request
-{ "orderId": "order-uuid" }
-// Response
-{ "data": { "order": { "custom_index": "string" }, "settleDiscount": { /* discount fields */ } } }
-```
-
-**`POST /transactions/build-txf-fill-resell-with-discount-evm`**
-```json
-// Request
-{ "offerId": "offer-uuid", "sender": "0xWalletAddress" }
-// Response
-{ "data": { "buyerDiscount": 0, "signature": "0x...", "buyerReferrer": "0x...", "buyerReferralPercent": 0 } }
-```
+`otc fill <otc-offer-id>` on Solana uses `new PublicKey(otcOfferIdArg)` — correctly handles the on-chain PDA address format.
 
 ---
 
 ## Summary Table
 
-| # | Chain | Function | Gap Severity | API Required |
-|---|-------|----------|-------------|--------------|
-| 1 | All | `createOffer`/`fillOffer` — min $10 USD | High | `GET /network-chains/v2/price` |
-| 2 | EVM | `createOffer` collateral computation | Medium | `GET /network-chains/v2/price` |
-| 3 | EVM | `settleOrder` token decimals | Medium | None (on-chain RPC) |
-| 8 | Solana | All txs — compute unit simulation | High | None (on-chain simulate) |
-| 9 | Solana | All txs — retry logic | High | None |
-| 10 | Solana | `settleOrder` w/ discount | High | `POST /transactions/build-transaction-settle-with-discount` |
-| 11 | Solana | `cancelOrder` w/ discount | High | `POST /transactions/build-transaction-cancel-with-discount` |
-| 12 | Solana | Native SOL wrapping | Medium | None (on-chain instruction) |
-| 13 | Sui | `settleOrder` w/ discount | Medium | `POST /transactions/build-settle-discount-signature-sui` |
-| 14 | Sui | `cancelOrder` w/ discount | Medium | `POST /transactions/build-cancel-discount-signature-sui` |
-| 15 | Sui | `customIndex` verification | High | None (constants audit) |
-| 17 | Aptos | Coin vs FA entry function | High | None (type string check) |
-| 18 | OTC EVM | `createOffer` buyer check | Low | None (on-chain RPC) |
-| 19 | OTC EVM | `createOffer` message signing | **Critical** | None (client-side sign) |
-| 20 | OTC EVM | `fillOffer` ERC20 pre-approval | High | None (on-chain RPC) |
-| 21 | OTC EVM | `fillOffer` referral encoding | Medium | `POST /transactions/build-txf-fill-resell-with-discount-evm` |
+| # | Chain | Function | Status |
+|---|-------|----------|--------|
+| 1 | All | Min $10 USD collateral on create/fill | ⏳ Pending |
+| 2 | EVM | Collateral auto-computation from price API | ⏳ Pending (optional) |
+| 3 | EVM | `settleOrder` — dynamic token decimals | ⏳ Pending |
+| 4 | EVM | `settleOrder` — token approval | ✅ Done |
+| 5 | EVM | `closeOffer` — referral chain params | ✅ Done |
+| 6 | EVM | USDT double-approval | ✅ Done |
+| 7 | EVM | ETH vs ERC20 path | ✅ Done |
+| 8 | Solana | CU simulation + 25% buffer | ✅ Done |
+| 9 | Solana | Retry logic (10×, 1500ms) | ✅ Done |
+| 10 | Solana | `settleOrder` w/ discount (API tx) | ✅ Done |
+| 11 | Solana | `cancelOrder` w/ discount (API tx) | ✅ Done |
+| 12 | Solana | Native SOL wrapping | ✅ Done |
+| 13 | Sui | `settleOrderWithDiscount` | ⏳ Pending |
+| 14 | Sui | `cancelOrderWithDiscount` | ⏳ Pending |
+| 15 | Sui | Config object ID (`customIndex`) | ✅ Done |
+| 16 | Aptos | Settle/cancel w/ discount | N/A |
+| 17 | Aptos | Coin vs Fungible Asset entry function | ✅ Done |
+| 18 | OTC EVM | `createOffer` buyer ownership check | ✅ Done |
+| 19 | OTC EVM | `createOffer` EIP-191 message signing | ✅ Done |
+| 20 | OTC EVM | `fillOffer` ERC20 pre-approval | ✅ Done |
+| 21 | OTC EVM | `fillOffer` referral discount encoding | ✅ Done |
+| 22 | OTC Solana | `fillOffer` PDA PublicKey format | ✅ Done |
 
 ---
 
-## Implementation Priority
+## Pending Work
 
-### Phase 1 — Critical (blocks correct operation)
-1. **OTC EVM `createOffer` signing** (#19): Without the signed message, OTC create always reverts. No API needed — pure client-side `signMessage`.
-2. **Solana compute units + retry** (#8, #9): Transactions fail intermittently without CU budget + retry.
-3. **Solana discount settle/cancel via API tx** (#10, #11): Must use API-built base64 transactions.
+### Next: High Priority
+- **#1 — Min $10 USD collateral check**: Needs `GET /network-chains/v2/price` lookup in `trade create-offer` and `trade fill-offer`. Apply to all chains (EVM, Solana; Sui/Aptos can use same price endpoint or skip).
+- **#3 — EVM settleOrder dynamic decimals**: Call `contract.decimals()` on the settlement token instead of using `--token-decimals` default.
 
-### Phase 2 — High (correctness issues)
-4. **Minimum $10 USD collateral check** (#1): Requires `GET /network-chains/v2/price` to compute USD value.
-5. **OTC EVM `fillOffer` ERC20 pre-approval** (#20): On-chain offer read + `ensureApproval` before fill.
-6. **Aptos Coin vs FA entry function** (#17): Type string detection, no API needed.
-7. **Sui `customIndex` verification** (#15): Audit constants against live deployment.
+### Next: Medium Priority
+- **#13, #14 — Sui discount settle/cancel**: Implement `settleOrderWithDiscount` and `cancelOrderWithDiscount` in `SuiPreMarket` using the API PTB endpoints.
 
-### Phase 3 — Medium (UX / completeness)
-8. **EVM `settleOrder` dynamic decimals** (#3): On-chain `token.decimals()` call.
-9. **Solana SOL wrapping** (#12): Add `buildWrapSolInstructions` for native SOL.
-10. **Sui discount settle/cancel** (#13, #14): Implement API-based PTB flow.
-11. **OTC EVM referral fill discount encoding** (#21): Implement `encodeResellData` + API call.
-12. **EVM `createOffer` collateral computation helper** (#2): Fetch `GET /network-chains/v2/price`, compute collateral automatically.
+---
+
+## API Endpoints Reference
+
+| Endpoint | Method | Used By |
+|----------|--------|---------|
+| `/network-chains/v2/price?chainId={id}&currency=usd` | GET | All — collateral USD check (#1, #2) |
+| `/transactions/build-transaction-settle-with-discount` | POST | Solana settle w/ discount (#10) |
+| `/transactions/build-transaction-cancel-with-discount` | POST | Solana cancel w/ discount (#11) |
+| `/transactions/v2/build-transaction-settle-with-discount-evm` | POST | EVM referral settle w/ discount |
+| `/transactions/build-transaction-settle-with-discount-evm` | POST | EVM non-referral settle w/ discount |
+| `/transactions/v2/build-transaction-cancel-with-discount-evm` | POST | EVM referral cancel w/ discount |
+| `/transactions/build-transaction-cancel-with-discount-evm` | POST | EVM non-referral cancel w/ discount |
+| `/transactions/build-settle-discount-signature-sui` | POST | Sui settle w/ discount (#13) |
+| `/transactions/build-cancel-discount-signature-sui` | POST | Sui cancel w/ discount (#14) |
+| `/transactions/build-txf-fill-resell-with-discount-evm` | POST | OTC EVM fill w/ discount (#21) |
 
 ---
 
 ## Reference Files
 
-- Frontend contracts: `/ref/whales-market-frontend-v2/src/contracts/`
-  - `evm/PreMarket.ts` — EVM offer/order/settle logic
-  - `evm/OtcPreMarket.ts` — OTC EVM with signing and `encodeResellData`
-  - `solana/PreMarket.ts` — Solana with CU simulation + retry + base64 tx handling
-  - `sui/PreMarket.ts` — Sui PTB construction with discount API
-  - `aptos/PreMarket.ts` — Aptos Coin vs FA entry function detection
-- Frontend constants: `/ref/whales-market-frontend-v2/src/constants/global.ts` — `MIN_COLLATERAL = 10` USD
-- CLI contracts: `src/blockchain/*/contracts/` and `src/blockchain/*/programs/`
+- Frontend: `/ref/whales-market-frontend-v2/src/contracts/`
+  - `evm/PreMarket.ts`, `evm/OtcPreMarket.ts`
+  - `solana/PreMarket.ts`
+  - `sui/PreMarket.ts`
+  - `aptos/PreMarket.ts`
+- Frontend constants: `src/constants/global.ts` — `MIN_COLLATERAL = 10` USD
+- CLI: `src/blockchain/*/contracts/`, `src/blockchain/*/programs/`
 - CLI commands: `src/commands/trade.ts`, `src/commands/otc.ts`
