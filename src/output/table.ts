@@ -237,6 +237,7 @@ export function printTokensTableDetailed(tokens: any[]): void {
 export function printOffersTable(offers: any[]): void {
   const table = new Table({
     head: [
+      chalk.cyan('Index'),
       chalk.cyan('ID'),
       chalk.cyan('Type'),
       chalk.cyan('Token ID'),
@@ -245,15 +246,17 @@ export function printOffersTable(offers: any[]): void {
       chalk.cyan('Status'),
       chalk.cyan('Address')
     ],
-    colWidths: [8, 8, 10, 15, 12, 10, 20]
+    colWidths: [6, 10, 8, 10, 12, 10, 10, 20]
   });
   
   offers.forEach((offer: any) => {
     // API may return: offer_by_user.address, offerByUser.address, offer_by_user__address, or address
     const addr = offer.address ?? offer.offer_by_user?.address ?? (offer as any).offerByUser?.address;
     const address = addr ?? (offer as any).offer_by_user__address ?? '-';
+    const idx = offer.offer_index ?? offer.offerIndex ?? '-';
     table.push([
-      offer.id ?? offer.offer_index ?? '-',
+      idx,
+      truncate(offer.id ?? '-', 10),
       offer.type ?? offer.offer_type ?? '-',
       offer.token_id ?? offer.token?.id ?? '-',
       offer.amount ?? offer.total_amount ?? '-',
@@ -270,21 +273,26 @@ export function printOrdersTable(orders: any[]): void {
   const table = new Table({
     head: [
       chalk.cyan('ID'),
+      chalk.cyan('Order Index'),
       chalk.cyan('Offer ID'),
       chalk.cyan('Buyer'),
       chalk.cyan('Seller'),
       chalk.cyan('Amount'),
       chalk.cyan('Status')
     ],
-    colWidths: [8, 10, 20, 20, 15, 12]
+    colWidths: [8, 12, 10, 20, 20, 15, 12]
   });
   
   orders.forEach((order: any) => {
+    const buyerAddr = order.buyer_address ?? order.buyer?.address ?? '-';
+    const sellerAddr = order.seller_address ?? order.seller?.address ?? '-';
+    const orderIndex = order.order_index ?? order.orderIndex ?? '-';
     table.push([
       order.id || '-',
+      String(orderIndex),
       order.offer_id || '-',
-      truncate(order.buyer_address || '-', 18),
-      truncate(order.seller_address || '-', 18),
+      truncate(buyerAddr, 18),
+      truncate(sellerAddr, 18),
       order.amount || '-',
       formatStatus(order.status || 'unknown')
     ]);

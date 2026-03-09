@@ -43,6 +43,22 @@ function getExplorerUrl(chainId: number): string | undefined {
   return undefined;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function resolveOfferId(
+  chainId: number,
+  offerIdArg: string,
+  apiUrl?: string
+): Promise<string> {
+  if (!isEvmChain(chainId) && !isSolanaChain(chainId)) return offerIdArg;
+  if (!UUID_REGEX.test(offerIdArg.trim())) return offerIdArg;
+  const res = await apiClient.getOffer(offerIdArg, apiUrl);
+  const o = (res as any)?.data ?? res;
+  const idx = o?.offer_index ?? o?.offerIndex;
+  if (idx != null && !isNaN(Number(idx))) return String(idx);
+  throw new Error(`Offer ${offerIdArg} not found or missing offer_index`);
+}
+
 export const tradeCommand = new Command('trade')
   .description('Pre-market trading (create, fill, close offers; settle, claim-collateral orders)');
 
@@ -188,18 +204,24 @@ tradeCommand
     try {
       const mnemonic = getMnemonic();
       const apiUrl = (config.get('apiUrl') as string) || 'https://api.whales.market';
+      const apiUrlOverride = (globalOpts as any).apiUrl;
+      const resolvedId = await resolveOfferId(chainId, offerIdArg, apiUrlOverride);
       const preMarket = getPreMarket(chainId, mnemonic, apiUrl);
 
-      const offerId = parseOfferId(chainId, offerIdArg);
+      const offerId = parseOfferId(chainId, resolvedId);
 
       if (isEvmChain(chainId)) {
         const offerData = await (preMarket as any).getOffer(offerId as number);
         let exTokenAddress = options.exToken;
         if (!exTokenAddress) {
+          exTokenAddress = offerData.exTokenAddress;
+        }
+        if (!exTokenAddress) {
           try {
-            const apiOffer = await apiClient.getOffer(offerIdArg);
+            const apiOffer = await apiClient.getOffer(offerIdArg, apiUrlOverride);
             const o = (apiOffer as any).data || apiOffer;
-            exTokenAddress = o?.ex_token || o?.exchange_token_address || o?.exToken;
+            const exToken = o?.ex_token ?? o?.exchange_token_address ?? o?.exToken;
+            exTokenAddress = typeof exToken === 'string' ? exToken : exToken?.address ?? exToken?.contract_address;
           } catch {}
           if (!exTokenAddress) exTokenAddress = ETH_ADDRESS;
         }
@@ -266,47 +288,51 @@ tradeCommand
   });
 
 // ─── close-offer ──────────────────────────────────────────────────────────────
+const closeOfferAction = async (offerIdArg: string, _options: any, command: Command) => {
+  const globalOpts = command.optsWithGlobals();
+  const chainId = getChainIdFromOpts(command);
+
+  const ok = await confirmTx(`Close offer ${offerIdArg}. Proceed?`, command);
+  if (!ok) return;
+
+  const spinner = ora('Closing offer...').start();
+
+  try {
+    const mnemonic = getMnemonic();
+    const apiUrl = (config.get('apiUrl') as string) || 'https://api.whales.market';
+    const apiUrlOverride = (globalOpts as any).apiUrl;
+    const resolvedId = await resolveOfferId(chainId, offerIdArg, apiUrlOverride);
+    const preMarket = getPreMarket(chainId, mnemonic, apiUrl);
+
+    const offerId = parseOfferId(chainId, resolvedId);
+
+    let tx: any;
+    if (isEvmChain(chainId)) {
+      tx = await (preMarket as any).closeOffer(offerId as number);
+    } else if (isSolanaChain(chainId)) {
+      tx = await (preMarket as any).closeOffer(offerId as number);
+    } else if (isSuiChain(chainId)) {
+      tx = await (preMarket as any).cancelOffer(offerId as string);
+    } else if (isAptosChain(chainId)) {
+      tx = await (preMarket as any).closeOffer(offerId as string);
+    } else {
+      throw new Error(`Unsupported chain: ${chainId}`);
+    }
+
+    spinner.stop();
+    printTxResultTable(tx, { explorerUrl: getExplorerUrl(chainId), action: command.name() });
+    await tx.wait();
+    if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
+  } catch (error: any) {
+    spinner.stop();
+    handleError(error, globalOpts.format);
+  }
+};
+
 tradeCommand
   .command('close-offer <offer-id>')
   .description('Close an unfilled or partially filled offer')
-  .action(async (offerIdArg, options, command) => {
-    const globalOpts = command.optsWithGlobals();
-    const chainId = getChainIdFromOpts(command);
-
-    const ok = await confirmTx(`Close offer ${offerIdArg}. Proceed?`, command);
-    if (!ok) return;
-
-    const spinner = ora('Closing offer...').start();
-
-    try {
-      const mnemonic = getMnemonic();
-      const apiUrl = (config.get('apiUrl') as string) || 'https://api.whales.market';
-      const preMarket = getPreMarket(chainId, mnemonic, apiUrl);
-
-      const offerId = parseOfferId(chainId, offerIdArg);
-
-      let tx: any;
-      if (isEvmChain(chainId)) {
-        tx = await (preMarket as any).closeOffer(offerId as number);
-      } else if (isSolanaChain(chainId)) {
-        tx = await (preMarket as any).closeOffer(offerId as number);
-      } else if (isSuiChain(chainId)) {
-        tx = await (preMarket as any).cancelOffer(offerId as string);
-      } else if (isAptosChain(chainId)) {
-        tx = await (preMarket as any).closeOffer(offerId as string);
-      } else {
-        throw new Error(`Unsupported chain: ${chainId}`);
-      }
-
-      spinner.stop();
-      printTxResultTable(tx, { explorerUrl: getExplorerUrl(chainId), action: 'close-offer' });
-      await tx.wait();
-      if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
-    } catch (error: any) {
-      spinner.stop();
-      handleError(error, globalOpts.format);
-    }
-  });
+  .action(closeOfferAction);
 
 // ─── settle ───────────────────────────────────────────────────────────────────
 tradeCommand

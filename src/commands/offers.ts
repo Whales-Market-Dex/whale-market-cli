@@ -84,21 +84,43 @@ offersCommand
 // My offers
 offersCommand
   .command('my')
-  .description('List my offers')
-  .option('--status <status>', 'Filter by status (open|filled|cancelled)')
+  .description('List my offers (open by default, use V2 API)')
+  .option('--status <status>', 'Filter by status (open|filled|cancelled)', 'open')
+  .option('--symbol <symbol>', 'Filter by token symbol')
+  .option('--limit <n>', 'Limit results', '20')
+  .option('--page <n>', 'Page number', '1')
+  .option('--address <addr>', 'Override address (default: from wallet)')
+  .option('--debug', 'Show API URL, params, and raw response')
   .action(async (options, command) => {
     const globalOpts = command.optsWithGlobals();
     const spinner = ora('Fetching your offers...').start();
     
     try {
-      const address = auth.getAddress();
-      const response = await apiClient.getOffersByAddress(address);
+      const chainId = typeof globalOpts.chainId === 'string' ? parseInt(globalOpts.chainId, 10) : (globalOpts.chainId ?? 666666);
+      const address = (options.address ?? auth.getAddress(undefined, chainId)).toLowerCase();
+      const params: any = {
+        category_token: 'pre_market',
+        is_by_me: true,
+        status: options.status,
+        page: parseInt(options.page),
+        take: parseInt(options.limit),
+      };
+      if (options.symbol) params.symbol = options.symbol;
+      const apiUrl = (globalOpts as any).apiUrl ?? (config.get('apiUrl') as string) ?? 'https://api.whales.market';
+      const response = await apiClient.getSimpleOffersByAddress(address, params, apiUrl);
       spinner.stop();
       
-      let offers = response.data || [];
+      const d = response.data ?? response;
+      let offers = Array.isArray(d) ? d : ((d as any)?.list ?? []);
       
-      if (options.status) {
-        offers = offers.filter((offer: any) => offer.status === options.status);
+      if (options.debug && globalOpts.format !== 'json') {
+        const base = apiUrl.replace(/\/$/, '');
+        const qs = new URLSearchParams(params).toString();
+        console.log(chalk.gray(`API: ${base}/v2/simple-offers-by-address/${address}?${qs}`));
+        console.log(chalk.gray(`Response: count=${(d as any)?.count ?? '?'}, list.length=${Array.isArray(offers) ? offers.length : '?'}`));
+        if (offers.length === 0) {
+          console.log(chalk.yellow('Tip: Use --api-url https://api-dev.whales-market.site for dev. Check address matches your wallet.'));
+        }
       }
       
       handleOutput(

@@ -109,6 +109,7 @@ export class EvmPreMarket {
       },
       isFullMatch: raw.fullMatch ?? raw[1],
       status,
+      exTokenAddress,
     };
   }
 

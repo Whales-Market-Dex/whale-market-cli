@@ -29,7 +29,12 @@ export class ApiClient {
     );
   }
   
-  async get<T>(url: string, params?: any): Promise<T> {
+  async get<T>(url: string, params?: any, baseUrlOverride?: string): Promise<T> {
+    if (baseUrlOverride) {
+      const fullUrl = `${baseUrlOverride.replace(/\/$/, '')}${url.startsWith('/') ? url : '/' + url}`;
+      const res = await axios.get(fullUrl, { params, timeout: 30000 });
+      return res.data as T;
+    }
     return this.client.get(url, { params });
   }
   
@@ -75,16 +80,27 @@ export class ApiClient {
    * Get offers from V2 API - used for order book (has more complete data)
    * Endpoint: GET /v2/offers
    */
-  async getOffersV2(params?: any): Promise<ApiResponse<any[]>> {
-    return this.get('/v2/offers', params);
+  async getOffersV2(params?: any, baseUrlOverride?: string): Promise<ApiResponse<any[]>> {
+    return this.get('/v2/offers', params, baseUrlOverride);
   }
   
-  async getOffer(id: string): Promise<ApiResponse<any>> {
-    return this.get(`/transactions/offers/${id}`);
+  async getOffer(id: string, baseUrlOverride?: string): Promise<ApiResponse<any>> {
+    return this.get(`/transactions/offers/${id}`, undefined, baseUrlOverride);
   }
   
   async getOffersByAddress(address: string): Promise<ApiResponse<any[]>> {
-    return this.get(`/transactions/offers-by-address/${address}`);
+    const addr = address.startsWith('0x') ? address.toLowerCase() : address;
+    return this.get(`/transactions/offers-by-address/${addr}`);
+  }
+
+  /**
+   * Get simple offers by address from V2 API (my offers with filters)
+   * Endpoint: GET /v2/simple-offers-by-address/:address
+   * Params: symbol, category_token, page, take, is_by_me, status, chain_id, etc.
+   */
+  async getSimpleOffersByAddress(address: string, params?: any, baseUrlOverride?: string): Promise<ApiResponse<any>> {
+    const addr = address.startsWith('0x') ? address.toLowerCase() : address;
+    return this.get(`/v2/simple-offers-by-address/${addr}`, params, baseUrlOverride);
   }
   
   async getOrders(params?: any): Promise<ApiResponse<any[]>> {
@@ -95,12 +111,24 @@ export class ApiClient {
     return this.get(`/transactions/orders/${id}`);
   }
   
-  async getOrdersByAddress(address: string): Promise<ApiResponse<any[]>> {
-    return this.get(`/transactions/orders-by-address/${address}`);
+  async getOrdersByAddress(address: string, params?: any): Promise<ApiResponse<any[]>> {
+    const addr = address.startsWith('0x') ? address.toLowerCase() : address;
+    return this.get(`/transactions/orders-by-address/${addr}`, params);
+  }
+
+  /**
+   * Get orders by address from V2 API (non-resell, with filters)
+   * Endpoint: GET /v2/orders-by-address-non-resell/:address
+   * Params: symbol, category_token, chain_id, page, take, etc.
+   */
+  async getOrdersByAddressV2(address: string, params?: any, baseUrlOverride?: string): Promise<ApiResponse<any>> {
+    const addr = address.startsWith('0x') ? address.toLowerCase() : address;
+    return this.get(`/v2/orders-by-address-non-resell/${addr}`, params, baseUrlOverride);
   }
   
   async getOrdersByOffer(address: string): Promise<ApiResponse<any[]>> {
-    return this.get(`/transactions/orders-by-offer/${address}`);
+    const addr = address.startsWith('0x') ? address.toLowerCase() : address;
+    return this.get(`/transactions/orders-by-offer/${addr}`);
   }
   
   async getNetworks(): Promise<ApiResponse<any[]>> {
