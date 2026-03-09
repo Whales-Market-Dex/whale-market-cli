@@ -6,6 +6,7 @@ import { config } from '../config';
 import { confirmTx } from './helpers/confirm';
 import {
   getOtcPreMarket,
+  getPreMarket,
   isEvmChain,
   isSolanaChain,
   parseOrderId,
@@ -45,15 +46,18 @@ export const otcCommand = new Command('otc')
 otcCommand
   .command('create <order-id>')
   .description('Create an OTC offer to resell your order position (buyer only)')
-  .requiredOption('--price <n>', 'Resell price in exToken units (e.g. 50 for 50 USDC)')
-  .requiredOption('--deadline <unix-ts>', 'Offer deadline (unix timestamp)')
+  .requiredOption('--price <n>', 'Resell price per token in exToken units (e.g. 1.5 for 1.5 USDC per token)')
   .requiredOption('--ex-token <addr>', 'Exchange token address')
+  .option('--deadline <unix-ts>', 'Offer deadline (default: 1 year from now)')
   .option('--ex-token-decimals <n>', 'Exchange token decimals for EVM (default: 6)', '6')
   .action(async (orderIdArg, options, command) => {
     const globalOpts = command.optsWithGlobals();
     const chainId = getChainIdFromOpts(command);
 
-    const ok = await confirmTx(`Create OTC offer for order ${orderIdArg} @ ${options.price}. Proceed?`, command);
+    const ok = await confirmTx(
+      `Create OTC offer for order ${orderIdArg} @ ${options.price} per token. Proceed?`,
+      command
+    );
     if (!ok) return;
 
     const spinner = ora('Creating OTC offer...').start();
@@ -64,13 +68,28 @@ otcCommand
       const otc = getOtcPreMarket(chainId, mnemonic, apiUrl);
 
       const orderId = parseOrderId(chainId, orderIdArg) as number;
-      const price = parseFloat(options.price);
-      const deadline = parseInt(options.deadline, 10);
+      const pricePerToken = parseFloat(options.price);
+      const exToken = options.exToken?.trim() ?? '';
+      if (exToken.startsWith('0x') && (chainId === 666666 || chainId === 999999)) {
+        throw new Error(
+          'Ex-token 0x... is EVM format. Add --chain-id for your EVM chain (e.g. --chain-id 97 for BSC testnet, 1 for Ethereum, 8453 for Base).'
+        );
+      }
+      const deadline = options.deadline
+        ? parseInt(options.deadline, 10)
+        : Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // default: 1 year
       if (isNaN(deadline)) throw new Error('--deadline must be a valid unix timestamp');
+
+      // Fetch order to get amount — value = price × amount (total collateral)
+      const preMarket = getPreMarket(chainId, mnemonic, apiUrl);
+      const order = await (preMarket as any).getOrder(orderId);
+      const amount = order?.amount ?? 0;
+      if (!amount || amount <= 0) throw new Error(`Order ${orderIdArg} not found or has zero amount`);
+      const totalValue = pricePerToken * amount;
 
       if (isEvmChain(chainId)) {
         const exDecimals = parseInt(options.exTokenDecimals, 10) || 6;
-        const value = parseUnits(price.toString(), exDecimals);
+        const value = parseUnits(totalValue.toString(), exDecimals);
 
         const tx = await (otc as any).createOffer({
           orderId,
@@ -84,7 +103,8 @@ otcCommand
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSolanaChain(chainId)) {
         const exToken = new PublicKey(options.exToken);
-        const value = new BN(Math.round(price * 1_000_000));
+        const exDecimals = parseInt(options.exTokenDecimals, 10) || 6;
+        const value = new BN(Math.round(totalValue * Math.pow(10, exDecimals)));
         const deadlineBN = new BN(deadline);
 
         const tx = await (otc as any).createOffer({

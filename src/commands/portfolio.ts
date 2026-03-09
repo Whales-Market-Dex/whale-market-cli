@@ -19,7 +19,8 @@ portfolioCommand
     const spinner = ora('Fetching portfolio...').start();
     
     try {
-      const address = options.address || auth.getAddress();
+      const chainId = typeof globalOpts.chainId === 'string' ? parseInt(globalOpts.chainId, 10) : (globalOpts.chainId ?? 666666);
+      const address = options.address || auth.getAddress(undefined, chainId);
       
       // Get offers and orders for this address
       const [offersResponse, ordersResponse] = await Promise.all([
@@ -27,8 +28,12 @@ portfolioCommand
         apiClient.getOrdersByAddress(address).catch(() => ({ data: [] }))
       ]);
       
-      const offers = offersResponse.data || [];
-      const orders = ordersResponse.data || [];
+      const extractList = (res: any) => {
+        const d = res?.data ?? res;
+        return Array.isArray(d) ? d : ((d as any)?.list ?? []);
+      };
+      const offers = extractList(offersResponse);
+      const orders = extractList(ordersResponse);
       
       spinner.stop();
       
@@ -65,11 +70,13 @@ portfolioCommand
     const spinner = ora('Fetching positions...').start();
     
     try {
-      const address = auth.getAddress();
+      const chainId = typeof globalOpts.chainId === 'string' ? parseInt(globalOpts.chainId, 10) : (globalOpts.chainId ?? 666666);
+      const address = auth.getAddress(undefined, chainId);
       const response = await apiClient.getOrdersByAddress(address);
       spinner.stop();
       
-      let orders = response.data || [];
+      const d = response.data ?? response;
+      let orders = Array.isArray(d) ? d : ((d as any)?.list ?? []);
       
       if (options.type) {
         orders = orders.filter((order: any) => order.status === options.type);
