@@ -25,6 +25,12 @@ import { handleError, printTxResultTable } from '../output';
 import { ETH_ADDRESS, parseUnits } from '../blockchain/evm/utils';
 import { EVM_CHAINS } from '../blockchain/evm/constants';
 import { apiClient } from '../api';
+import {
+  EvmPreMarket,
+  SolanaPreMarket,
+  SuiPreMarket,
+  AptosPreMarket,
+} from '../blockchain';
 
 const WEI6 = 1_000_000;
 
@@ -82,7 +88,7 @@ tradeCommand
         return;
       }
     } else {
-      chainId = chainId ?? 666666;
+      if (chainId == null) throw new Error('--chain-id is required when passing an on-chain ID (use a UUID to auto-resolve chain and ID)');
     }
 
     const collateral = amount * price; // exToken units for EVM, USD for Solana/Sui/Aptos
@@ -123,6 +129,7 @@ tradeCommand
       const isFullMatch = Boolean(options.fullMatch);
 
       if (isEvmChain(chainId)) {
+        const pm = preMarket as EvmPreMarket;
         // EVM contract uses bytes32 for tokenId - accept hex string (0x...) or numeric
         const tokenId =
           tokenOnChainId.startsWith('0x') && tokenOnChainId.length === 66
@@ -136,7 +143,7 @@ tradeCommand
         const exDecimals = parseInt(options.exTokenDecimals, 10) || (exTokenAddress === ETH_ADDRESS ? 18 : 6);
         const collateral = parseUnits((amount * price).toString(), exDecimals);
 
-        const tx = await (preMarket as any).createOffer({
+        const tx = await pm.createOffer({
           tokenId,
           side: options.side,
           amount,
@@ -149,12 +156,13 @@ tradeCommand
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSolanaChain(chainId)) {
+        const pm = preMarket as SolanaPreMarket;
         const tokenId = parseInt(tokenOnChainId, 10);
         if (isNaN(tokenId)) throw new Error('--token must be numeric or token UUID for Solana');
         const exToken = new PublicKey(options.exToken);
         const rawPrice = Math.round(price * WEI6);
 
-        const tx = await (preMarket as any).createOffer({
+        const tx = await pm.createOffer({
           tokenId,
           side: options.side,
           exToken,
@@ -167,13 +175,14 @@ tradeCommand
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSuiChain(chainId)) {
+        const pm = preMarket as SuiPreMarket;
         const tokenConfig = options.tokenConfig || tokenOnChainId;
         if (!tokenConfig) throw new Error('--token-config is required for Sui');
         const coinType = options.coinType || '0x2::sui::SUI';
         const rawAmount = BigInt(Math.round(amount * WEI6));
         const rawValue = BigInt(Math.round(amount * price * WEI6));
 
-        const tx = await (preMarket as any).createOffer({
+        const tx = await pm.createOffer({
           tokenConfig,
           offerType: options.side === 'buy' ? 'Buy' : 'Sell',
           amount: rawAmount,
@@ -186,11 +195,12 @@ tradeCommand
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isAptosChain(chainId)) {
+        const pm = preMarket as AptosPreMarket;
         const tokenConfig = options.tokenConfig || tokenOnChainId;
         if (!tokenConfig) throw new Error('--token-config is required for Aptos');
         const rawValue = Math.round(amount * price * WEI6);
 
-        const tx = await (preMarket as any).createOffer({
+        const tx = await pm.createOffer({
           tokenConfig,
           exToken: options.exToken,
           side: options.side,
@@ -250,7 +260,8 @@ tradeCommand
         : parseOfferId(chainId, offerOnChainId);
 
       if (isEvmChain(chainId)) {
-        const offerData = await (preMarket as any).getOffer(offerId as number);
+        const pm = preMarket as EvmPreMarket;
+        const offerData = await pm.getOffer(offerId as number);
         let exTokenAddress = options.exToken;
         if (!exTokenAddress) {
           exTokenAddress = offerData.exTokenAddress;
@@ -291,7 +302,7 @@ tradeCommand
           if (err.message?.includes('$10')) throw err;
         }
 
-        const tx = await (preMarket as any).fillOffer({
+        const tx = await pm.fillOffer({
           offerId: offerId as number,
           amount,
           collateral,
@@ -302,22 +313,27 @@ tradeCommand
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSolanaChain(chainId)) {
-        const amount = options.amount ? parseFloat(options.amount) : (await (preMarket as any).getOffer(offerId as number)).totalAmount - (await (preMarket as any).getOffer(offerId as number)).filledAmount;
+        const pm = preMarket as SolanaPreMarket;
+        const offerData = await pm.getOffer(offerId as number);
+        const amount = options.amount
+          ? parseFloat(options.amount)
+          : offerData.totalAmount - offerData.filledAmount;
 
-        const tx = await (preMarket as any).fillOffer({
+        const tx = await pm.fillOffer({
           offerId: offerId as number,
-          amount: amount || (await (preMarket as any).getOffer(offerId as number)).totalAmount,
+          amount: amount || offerData.totalAmount,
         });
         spinner.stop();
         printTxResultTable(tx, { explorerUrl: getExplorerUrl(chainId), action: 'fill-offer' });
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSuiChain(chainId)) {
-        const offerData = await (preMarket as any).getOffer(offerId as string);
+        const pm = preMarket as SuiPreMarket;
+        const offerData = await pm.getOffer(offerId as string);
         const amount = options.amount ? parseFloat(options.amount) : offerData.totalAmount - offerData.filledAmount;
         const rawAmount = BigInt(Math.round(amount * WEI6));
 
-        const tx = await (preMarket as any).fillOffer({
+        const tx = await pm.fillOffer({
           offerId: offerId as string,
           amount: rawAmount,
         });
@@ -326,10 +342,11 @@ tradeCommand
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isAptosChain(chainId)) {
-        const offerData = await (preMarket as any).getOffer(offerId as string);
+        const pm = preMarket as AptosPreMarket;
+        const offerData = await pm.getOffer(offerId as string);
         const amount = options.amount ? parseFloat(options.amount) : offerData.totalAmount - offerData.filledAmount;
 
-        const tx = await (preMarket as any).fillOffer({
+        const tx = await pm.fillOffer({
           offerAddress: offerId as string,
           amount: amount || offerData.totalAmount,
         });
@@ -369,7 +386,7 @@ const closeOfferAction = async (offerIdArg: string, _options: any, command: Comm
       offerOnChainId = resolved.offerIndex;
       offerCustomIndex = resolved.customIndex;
     } else {
-      chainId = chainId ?? 666666;
+      if (chainId == null) throw new Error('--chain-id is required when passing an on-chain ID (use a UUID to auto-resolve chain and ID)');
       offerOnChainId = offerIdArg;
     }
 
@@ -381,13 +398,13 @@ const closeOfferAction = async (offerIdArg: string, _options: any, command: Comm
 
     let tx: any;
     if (isEvmChain(chainId)) {
-      tx = await (preMarket as any).closeOffer(offerId as number);
+      tx = await (preMarket as EvmPreMarket).closeOffer(offerId as number);
     } else if (isSolanaChain(chainId)) {
-      tx = await (preMarket as any).closeOffer(offerId as number);
+      tx = await (preMarket as SolanaPreMarket).closeOffer(offerId as number);
     } else if (isSuiChain(chainId)) {
-      tx = await (preMarket as any).cancelOffer(offerId as string);
+      tx = await (preMarket as SuiPreMarket).cancelOffer(offerId as string);
     } else if (isAptosChain(chainId)) {
-      tx = await (preMarket as any).closeOffer(offerId as string);
+      tx = await (preMarket as AptosPreMarket).closeOffer(offerId as string);
     } else {
       throw new Error(`Unsupported chain: ${chainId}`);
     }
@@ -452,6 +469,7 @@ tradeCommand
 
       let tx: any;
       if (isEvmChain(chainId)) {
+        const pm = preMarket as EvmPreMarket;
         const tokenAddress = options.tokenAddress;
         const amount = options.amount;
         if (!tokenAddress || amount === undefined || amount === null) {
@@ -459,59 +477,62 @@ tradeCommand
         }
         const decimals = options.tokenDecimals !== undefined
           ? parseInt(options.tokenDecimals, 10)
-          : await (preMarket as any).getTokenDecimals(tokenAddress);
+          : await pm.getTokenDecimals(tokenAddress);
         const rawAmount = parseUnits(amount.toString(), decimals);
         if (options.withDiscount && orderUUID) {
-          tx = await (preMarket as any).settleOrderWithDiscount({
+          tx = await pm.settleOrderWithDiscount({
             orderId: orderId as number,
             orderUUID,
             tokenAddress,
             amount: rawAmount,
           });
         } else {
-          tx = await (preMarket as any).settleOrder({
+          tx = await pm.settleOrder({
             orderId: orderId as number,
             tokenAddress,
             amount: rawAmount,
           });
         }
       } else if (isSolanaChain(chainId)) {
+        const pm = preMarket as SolanaPreMarket;
         if (options.withDiscount) {
-          tx = await (preMarket as any).settleOrderWithDiscount({ orderId: orderId as number });
+          tx = await pm.settleOrderWithDiscount({ orderId: orderId as number });
         } else {
-          tx = await (preMarket as any).settleOrder(orderId as number);
+          tx = await pm.settleOrder(orderId as number);
         }
       } else if (isSuiChain(chainId)) {
+        const pm = preMarket as SuiPreMarket;
         if (options.withDiscount && orderUUID) {
           const sd = await apiClient.buildSuiSettleDiscount(orderUUID);
           if (!sd) throw new Error('Settle discount data not available from API');
           const sig = Array.isArray(sd.signature)
             ? new Uint8Array(sd.signature)
             : new Uint8Array(Buffer.from(sd.signature, 'hex'));
-          tx = await (preMarket as any).settleOrderWithDiscount({
+          tx = await pm.settleOrderWithDiscount({
             orderId: orderId as string,
             sellerDiscount: Number(sd.sellerDiscount),
             buyerDiscount: Number(sd.buyerDiscount),
             signature: sig,
           });
         } else {
-          tx = await (preMarket as any).settleOrder(orderId as string);
+          tx = await pm.settleOrder(orderId as string);
         }
       } else if (isAptosChain(chainId)) {
+        const pm = preMarket as AptosPreMarket;
         if (options.withDiscount && orderUUID) {
           const orderRes = await apiClient.getOrder(orderIdArg);
           const order = (orderRes as any).data || orderRes;
           if (!order?.seller_discount || !order?.buyer_discount || !order?.signature) {
             throw new Error('Discount data not available. Fetch order from API first.');
           }
-          tx = await (preMarket as any).settleOrderWithDiscount({
+          tx = await pm.settleOrderWithDiscount({
             orderAddress: orderId as string,
             sellerDiscount: order.seller_discount,
             buyerDiscount: order.buyer_discount,
             signature: order.signature,
           });
         } else {
-          tx = await (preMarket as any).settleOrder(orderId as string);
+          tx = await pm.settleOrder(orderId as string);
         }
       } else {
         throw new Error(`Unsupported chain: ${chainId}`);
@@ -569,21 +590,24 @@ tradeCommand
 
       let tx: any;
       if (isEvmChain(chainId)) {
+        const pm = preMarket as EvmPreMarket;
         if (options.withDiscount && orderUUID) {
-          tx = await (preMarket as any).cancelOrderWithDiscount({
+          tx = await pm.cancelOrderWithDiscount({
             orderId: orderId as number,
             orderUUID,
           });
         } else {
-          tx = await (preMarket as any).cancelOrder(orderId as number);
+          tx = await pm.cancelOrder(orderId as number);
         }
       } else if (isSolanaChain(chainId)) {
+        const pm = preMarket as SolanaPreMarket;
         if (options.withDiscount) {
-          tx = await (preMarket as any).cancelOrderWithDiscount({ orderId: orderId as number });
+          tx = await pm.cancelOrderWithDiscount({ orderId: orderId as number });
         } else {
-          tx = await (preMarket as any).cancelOrder(orderId as number);
+          tx = await pm.cancelOrder(orderId as number);
         }
       } else if (isSuiChain(chainId)) {
+        const pm = preMarket as SuiPreMarket;
         if (options.withDiscount && orderUUID) {
           const discountData = await apiClient.buildSuiCancelDiscount(orderUUID);
           const sd = discountData?.settleDiscount;
@@ -592,30 +616,31 @@ tradeCommand
           const sig = Array.isArray(sd.signature)
             ? new Uint8Array(sd.signature)
             : new Uint8Array(Buffer.from(sd.signature, 'hex'));
-          tx = await (preMarket as any).cancelOrderWithDiscount({
+          tx = await pm.cancelOrderWithDiscount({
             orderId: onChainOrderId,
             sellerDiscount: Number(sd.sellerDiscount),
             buyerDiscount: Number(sd.buyerDiscount),
             signature: sig,
           });
         } else {
-          tx = await (preMarket as any).cancelOrder(orderId as string);
+          tx = await pm.cancelOrder(orderId as string);
         }
       } else if (isAptosChain(chainId)) {
+        const pm = preMarket as AptosPreMarket;
         if (options.withDiscount && orderUUID) {
           const orderRes = await apiClient.getOrder(orderIdArg);
           const order = (orderRes as any).data || orderRes;
           if (!order?.seller_discount || !order?.buyer_discount || !order?.signature) {
             throw new Error('Discount data not available. Fetch order from API first.');
           }
-          tx = await (preMarket as any).cancelOrderWithDiscount({
+          tx = await pm.cancelOrderWithDiscount({
             orderAddress: orderId as string,
             sellerDiscount: order.seller_discount,
             buyerDiscount: order.buyer_discount,
             signature: order.signature,
           });
         } else {
-          tx = await (preMarket as any).cancelOrder(orderId as string);
+          tx = await pm.cancelOrder(orderId as string);
         }
       } else {
         throw new Error(`Unsupported chain: ${chainId}`);

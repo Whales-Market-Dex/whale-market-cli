@@ -11,6 +11,12 @@ import {
   resolveOrder,
 } from './helpers/resolve';
 import {
+  EvmPreMarket,
+  SolanaPreMarket,
+  EvmOtcPreMarket,
+  SolanaOtcPreMarket,
+} from '../blockchain';
+import {
   getOtcPreMarket,
   getPreMarket,
   isEvmChain,
@@ -90,16 +96,18 @@ otcCommand
 
       // Fetch order to get amount — value = price × amount (total collateral)
       const preMarket = getPreMarket(chainId, mnemonic, apiUrl);
-      const order = await (preMarket as any).getOrder(orderId);
-      const amount = order?.amount ?? 0;
-      if (!amount || amount <= 0) throw new Error(`Order ${orderIdArg} not found or has zero amount`);
-      const totalValue = pricePerToken * amount;
 
       if (isEvmChain(chainId)) {
-        const exDecimals = await (preMarket as any).getTokenDecimals(options.exToken);
+        const pm = preMarket as EvmPreMarket;
+        const evmOtc = otc as EvmOtcPreMarket;
+        const order = await pm.getOrder(orderId);
+        const amount = order?.amount ?? 0;
+        if (!amount || amount <= 0) throw new Error(`Order ${orderIdArg} not found or has zero amount`);
+        const totalValue = pricePerToken * amount;
+        const exDecimals = await pm.getTokenDecimals(options.exToken);
         const value = parseUnits(totalValue.toString(), exDecimals);
 
-        const tx = await (otc as any).createOffer({
+        const tx = await evmOtc.createOffer({
           orderId,
           exTokenAddress: options.exToken,
           value,
@@ -110,12 +118,18 @@ otcCommand
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSolanaChain(chainId)) {
+        const pm = preMarket as SolanaPreMarket;
+        const solOtc = otc as SolanaOtcPreMarket;
+        const order = await pm.getOrder(orderId);
+        const amount = order?.amount ?? 0;
+        if (!amount || amount <= 0) throw new Error(`Order ${orderIdArg} not found or has zero amount`);
+        const totalValue = pricePerToken * amount;
         const exToken = new PublicKey(options.exToken);
-        const exDecimals = await (preMarket as any).getTokenDecimals(options.exToken);
+        const exDecimals = await pm.getTokenDecimals(options.exToken);
         const value = new BN(Math.round(totalValue * Math.pow(10, exDecimals)));
         const deadlineBN = new BN(deadline);
 
-        const tx = await (otc as any).createOffer({
+        const tx = await solOtc.createOffer({
           orderId,
           exToken,
           value,
@@ -169,23 +183,22 @@ otcCommand
       const otc = getOtcPreMarket(chainId, mnemonic, apiUrl);
 
       if (isEvmChain(chainId)) {
+        const evmOtc = otc as EvmOtcPreMarket;
         const offerId = otcOnChainId;
         let tx: any;
         if (options.withDiscount && offerUUID) {
-          tx = await (otc as any).fillOfferWithDiscount({
-            offerId,
-            offerUUID,
-          });
+          tx = await evmOtc.fillOfferWithDiscount({ offerId, offerUUID });
         } else {
-          tx = await (otc as any).fillOffer(offerId);
+          tx = await evmOtc.fillOffer(offerId);
         }
         spinner.stop();
         printTxResultTable(tx, { explorerUrl: getExplorerUrl(chainId), action: 'otc fill' });
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSolanaChain(chainId)) {
+        const solOtc = otc as SolanaOtcPreMarket;
         const otcOfferPubkey = new PublicKey(otcOnChainId);
-        const tx = await (otc as any).fillOffer(otcOfferPubkey);
+        const tx = await solOtc.fillOffer(otcOfferPubkey);
         spinner.stop();
         printTxResultTable(tx, { explorerUrl: getExplorerUrl(chainId), action: 'otc fill' });
         await tx.wait();
@@ -230,14 +243,14 @@ otcCommand
       const otc = getOtcPreMarket(chainId, mnemonic, apiUrl);
 
       if (isEvmChain(chainId)) {
-        const tx = await (otc as any).cancelOffer(otcOnChainId);
+        const tx = await (otc as EvmOtcPreMarket).cancelOffer(otcOnChainId);
         spinner.stop();
         printTxResultTable(tx, { explorerUrl: getExplorerUrl(chainId), action: 'otc cancel' });
         await tx.wait();
         if (globalOpts.format !== 'json') console.log('Confirmed on-chain.');
       } else if (isSolanaChain(chainId)) {
         const otcOfferPubkey = new PublicKey(otcOnChainId);
-        const tx = await (otc as any).cancelOffer(otcOfferPubkey);
+        const tx = await (otc as SolanaOtcPreMarket).cancelOffer(otcOfferPubkey);
         spinner.stop();
         printTxResultTable(tx, { explorerUrl: getExplorerUrl(chainId), action: 'otc cancel' });
         await tx.wait();
