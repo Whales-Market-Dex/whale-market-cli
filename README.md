@@ -37,8 +37,8 @@ whales tokens list
 # 3. View order book
 whales book MEGA
 
-# 4. Place an offer (Solana mainnet, default chain)
-whales trade create-offer --token 1 --side buy --price 0.5 --amount 100 --ex-token <USDC_mint>
+# 4. Place an offer — pass a token UUID to auto-resolve chain + on-chain ID
+whales trade create-offer --token <token-uuid> --side buy --price 0.5 --amount 100 --ex-token <USDC_mint>
 
 # 5. Check your positions
 whales orders my
@@ -256,7 +256,7 @@ Use `--chain-id` to target a specific network. Common values:
 
 | Chain | Chain ID |
 |-------|----------|
-| Solana Mainnet | `666666` (default) |
+| Solana Mainnet | `666666` |
 | Solana Devnet | `999999` |
 | Ethereum | `1` |
 | BNB Chain | `56` |
@@ -504,7 +504,7 @@ Create a buy or sell pre-market offer on-chain.
 
 ```bash
 whales trade create-offer \
-  --token <token-id> \
+  --token <token-uuid-or-id> \
   --side buy \
   --price 0.5 \
   --amount 100 \
@@ -514,33 +514,36 @@ whales trade create-offer \
 Options:
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--token <id>` | Yes | Token ID (numeric for EVM/Solana, config address for Sui/Aptos) |
+| `--token <id>` | Yes | Token UUID (auto-resolves chain + ID), numeric, or bytes32 hex |
 | `--side <side>` | Yes | `buy` or `sell` |
 | `--price <n>` | Yes | Price per token in USD (e.g. `0.5`) |
 | `--amount <n>` | Yes | Token amount |
 | `--ex-token <addr>` | Yes | Exchange token address (USDC, USDT, ETH, wSOL, etc.) |
 | `--full-match` | No | Require full fill only (no partial fills) |
-| `--ex-token-decimals <n>` | No | Decimals for exchange token (default: 6) |
 | `--token-config <addr>` | Sui/Aptos | Token config object address |
 | `--coin-type <type>` | Sui | Coin type (default: `0x2::sui::SUI`) |
 
-**Chain-specific token ID format:**
-- EVM: numeric (e.g. `1`) or bytes32 hex (e.g. `0x313638...`)
-- Solana: numeric (e.g. `5`)
-- Sui/Aptos: config object address (e.g. `0x1a2b...`)
+> Minimum collateral: **$10 USD**. EVM exchange token price is fetched from the API to convert to USD.
+
+> Exchange token decimals are fetched on-chain automatically (18 for ETH/native, otherwise `token.decimals()`).
+
+**Token ID formats (when not using UUID):**
+- EVM: numeric (e.g. `1`) or bytes32 hex (e.g. `0x313638...`) — requires `--chain-id`
+- Solana: numeric (e.g. `5`) — requires `--chain-id`
+- Sui/Aptos: config object address — use `--token-config` instead
 
 **Examples:**
 
 ```bash
-# Solana mainnet buy offer (default chain 666666)
+# Using token UUID — chain and on-chain ID are auto-resolved
 whales trade create-offer \
-  --token 5 \
+  --token a2fb64a3-6bff-465c-bbee-d7fd7d1ca45d \
   --side buy \
   --price 0.25 \
   --amount 500 \
   --ex-token EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
 
-# EVM (BSC, chain 56) sell offer with USDT
+# EVM (BSC, chain 56) sell offer with USDT — on-chain token ID requires --chain-id
 whales trade create-offer \
   --chain-id 56 \
   --token 10 \
@@ -550,8 +553,11 @@ whales trade create-offer \
   --ex-token 0x55d398326f99059fF775485246999027B3197955
 
 # Full match only
-whales trade create-offer --token 5 --side buy --price 0.5 --amount 100 \
-  --ex-token EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v --full-match
+whales trade create-offer \
+  --token a2fb64a3-6bff-465c-bbee-d7fd7d1ca45d \
+  --side buy --price 0.5 --amount 100 \
+  --ex-token EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v \
+  --full-match
 ```
 
 ---
@@ -561,19 +567,21 @@ whales trade create-offer --token 5 --side buy --price 0.5 --amount 100 \
 Fill an existing offer (become the counterparty).
 
 ```bash
-# Fill fully (default)
-whales trade fill-offer 123
+# Fill fully using offer UUID — chain and on-chain ID auto-resolved
+whales trade fill-offer <offer-uuid>
 
 # Fill partially
-whales trade fill-offer 123 --amount 50
+whales trade fill-offer <offer-uuid> --amount 50
 
-# Accept UUID from API
-whales trade fill-offer <uuid>
+# On-chain ID — requires --chain-id
+whales trade fill-offer 123 --chain-id 56
 ```
 
 Options:
 - `--amount <n>` — partial fill amount (default: fill the remaining amount)
 - `--ex-token <addr>` — exchange token address (EVM: auto-fetched from offer if omitted)
+
+> Minimum fill collateral: **$10 USD** (only enforced when the remaining offer collateral is also ≥ $10).
 
 ---
 
@@ -582,8 +590,11 @@ Options:
 Close an offer you created. Reclaims your collateral for any unfilled portion.
 
 ```bash
-whales trade close-offer 123
-whales trade close-offer <uuid>
+# Offer UUID — chain and on-chain ID auto-resolved
+whales trade close-offer <offer-uuid>
+
+# On-chain ID — requires --chain-id
+whales trade close-offer 123 --chain-id 56
 ```
 
 ---
@@ -593,29 +604,28 @@ whales trade close-offer <uuid>
 Settle a filled order. The seller delivers the settlement token to finalize the trade.
 
 ```bash
-# Solana / Sui / Aptos
-whales trade settle 42
+# Order UUID — chain, on-chain ID, token address, and amount all auto-resolved from API
+whales trade settle <order-uuid>
 
-# EVM — requires token address and amount
-whales trade settle 42 \
-  --token-address 0xTokenAddress \
-  --amount 100 \
-  --token-decimals 18
+# With referral discount
+whales trade settle <order-uuid> --with-discount
 
-# With discount (referral fee reduction)
-whales trade settle 42 \
+# On-chain ID (EVM) — requires --chain-id, --token-address, and --amount
+whales trade settle 852 \
+  --chain-id 97 \
   --token-address 0xTokenAddress \
-  --amount 100 \
-  --with-discount \
-  --order-uuid <order-uuid-from-api>
+  --amount 100
+
+# Solana / Sui / Aptos — no token address needed
+whales trade settle 42 --chain-id 666666
 ```
 
 Options:
-- `--token-address <addr>` — settlement token address (EVM: required)
-- `--amount <n>` — settlement token amount in human units (EVM: required)
-- `--token-decimals <n>` — token decimals (default: 6)
-- `--with-discount` — apply referral discount (requires `--order-uuid`)
-- `--order-uuid <uuid>` — order UUID from the API
+- `--token-address <addr>` — settlement token address (EVM; auto-fetched from API when passing UUID)
+- `--amount <n>` — settlement token amount in human units (EVM; auto-fetched from API when passing UUID)
+- `--token-decimals <n>` — settlement token decimals override (EVM; auto-detected on-chain if omitted)
+- `--with-discount` — apply referral discount
+- `--order-uuid <uuid>` — order UUID (required for `--with-discount` on EVM/Sui; not needed on Solana)
 
 ---
 
@@ -624,17 +634,19 @@ Options:
 Cancel an unfilled order and reclaim your collateral as a buyer.
 
 ```bash
-whales trade claim-collateral 42
+# Order UUID — chain and on-chain ID auto-resolved
+whales trade claim-collateral <order-uuid>
 
-# With discount
-whales trade claim-collateral 42 \
-  --with-discount \
-  --order-uuid <order-uuid-from-api>
+# With referral discount
+whales trade claim-collateral <order-uuid> --with-discount
+
+# On-chain ID — requires --chain-id
+whales trade claim-collateral 42 --chain-id 666666
 ```
 
 Options:
-- `--with-discount` — apply referral discount (requires `--order-uuid`)
-- `--order-uuid <uuid>` — order UUID from the API
+- `--with-discount` — apply referral discount
+- `--order-uuid <uuid>` — order UUID (required for `--with-discount` on EVM/Sui; not needed on Solana)
 
 ---
 
@@ -647,12 +659,14 @@ OTC lets a buyer resell their order position to a new buyer before settlement. S
 Create an OTC offer to resell your order position.
 
 ```bash
-whales otc create 42 \
+# Order UUID — chain and on-chain ID auto-resolved
+whales otc create <order-uuid> \
   --price 1.2 \
   --ex-token 0xUSDCAddress
 
-# With custom deadline (unix timestamp)
+# On-chain ID — requires --chain-id
 whales otc create 42 \
+  --chain-id 56 \
   --price 1.2 \
   --ex-token 0xUSDCAddress \
   --deadline 1800000000
@@ -664,7 +678,8 @@ Options:
 | `--price <n>` | Yes | Resell price per token (in exchange token units, e.g. 1.2 USDC) |
 | `--ex-token <addr>` | Yes | Exchange token address |
 | `--deadline <unix-ts>` | No | Offer expiry (default: 1 year from now) |
-| `--ex-token-decimals <n>` | No | Exchange token decimals (default: 6) |
+
+> Exchange token decimals are fetched on-chain automatically.
 
 ---
 
@@ -673,19 +688,22 @@ Options:
 Fill an OTC offer (buy someone else's order position).
 
 ```bash
-# EVM (numeric offer ID)
-whales otc fill 7
+# OTC offer UUID — chain and on-chain ID auto-resolved
+whales otc fill <otc-offer-uuid>
 
-# Solana (on-chain PDA pubkey)
-whales otc fill <base58PubkeyOfOtcOffer>
+# With referral discount (UUID doubles as --offer-uuid)
+whales otc fill <otc-offer-uuid> --with-discount
 
-# With referral discount
-whales otc fill 7 --with-discount --offer-uuid <uuid>
+# EVM on-chain ID — requires --chain-id
+whales otc fill 7 --chain-id 56
+
+# Solana on-chain PDA pubkey — requires --chain-id
+whales otc fill <base58PubkeyOfOtcOffer> --chain-id 666666
 ```
 
 Options:
 - `--with-discount` — apply referral discount
-- `--offer-uuid <uuid>` — OTC offer UUID from API (required for `--with-discount`)
+- `--offer-uuid <uuid>` — OTC offer UUID (required for `--with-discount` when passing on-chain ID)
 
 ---
 
@@ -694,11 +712,14 @@ Options:
 Cancel an OTC offer you created and reclaim your order position.
 
 ```bash
-# EVM
-whales otc cancel 7
+# OTC offer UUID — chain and on-chain ID auto-resolved
+whales otc cancel <otc-offer-uuid>
 
-# Solana
-whales otc cancel <base58Pubkey>
+# EVM on-chain ID — requires --chain-id
+whales otc cancel 7 --chain-id 56
+
+# Solana on-chain PDA pubkey — requires --chain-id
+whales otc cancel <base58Pubkey> --chain-id 666666
 ```
 
 ---
