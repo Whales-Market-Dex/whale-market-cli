@@ -344,7 +344,7 @@ export function printTxResultTable(
   txResult: { txHash: string; wait(): Promise<void> },
   options?: { explorerUrl?: string; action?: string }
 ): void {
-  const table = new Table({ colWidths: [18, 70] });
+  const table = new Table();
   table.push(
     [chalk.cyan('Transaction'), txResult.txHash],
     [chalk.cyan('Status'), chalk.green('Submitted')]
