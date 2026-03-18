@@ -402,6 +402,19 @@ If `fillAmount` covers all remaining unfilled tokens, the $10 USD check is skipp
 | 27 | All | `$10` collateral check uses `getExTokenPrices` API for all chains (not EVM-only) | ✅ Done |
 | 28 | All | `fill-offer` $10 min check extended to Solana/Sui/Aptos via shared `checkFillCollateral` helper | ✅ Done |
 | 29 | All | `checkFillCollateral` — skip $10 check when filling all remaining unfilled tokens | ✅ Done |
+| 30 | All | `auth.ts` — replace `=== SOLANA_CHAIN_ID` checks with `isSolanaChain()` to cover devnet | ✅ Done |
+
+---
+
+### 30. `auth.ts` — Use `isSolanaChain()` for Devnet Coverage ✅ Done
+
+**Before:** `auth.ts` had a local `const SOLANA_CHAIN_ID = 666666` and used `=== SOLANA_CHAIN_ID` in all three methods (`getWallet`, `signTransaction`, `signMessage`). This silently fell through to the EVM path when `chainId` was `999999` (Solana devnet).
+
+**After:**
+- Removed local `SOLANA_CHAIN_ID` constant
+- Imported `isSolanaChain` and `SOLANA_MAINNET_CHAIN_ID` from `./commands/helpers/chain`
+- Replaced all three `=== SOLANA_CHAIN_ID` checks with `isSolanaChain(chainId)`, which covers both mainnet (666666) and devnet (999999)
+- `getChainId()` default fallback changed to `SOLANA_MAINNET_CHAIN_ID` (same value, no behaviour change)
 
 ---
 

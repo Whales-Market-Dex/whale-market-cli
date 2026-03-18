@@ -2,12 +2,11 @@ import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { config } from './config';
 import { deriveSolanaKeypair, deriveEvmWallet, deriveEvmAddress, deriveSolanaAddress } from './utils/wallet';
-
-const SOLANA_CHAIN_ID = 666666;
+import { isSolanaChain, SOLANA_MAINNET_CHAIN_ID } from './commands/helpers/chain';
 
 function getChainId(): number {
   const chainId = config.get('chainId');
-  return typeof chainId === 'number' ? chainId : SOLANA_CHAIN_ID;
+  return typeof chainId === 'number' ? chainId : SOLANA_MAINNET_CHAIN_ID;
 }
 
 function getMnemonic(): string {
@@ -27,9 +26,8 @@ export class Auth {
   getWallet(mnemonicOverride?: string, chainIdOverride?: number): { address: string; type: 'solana' | 'evm' } {
     const mnemonic = mnemonicOverride ?? getMnemonic();
     const chainId = chainIdOverride ?? getChainId();
-    const type = chainId === SOLANA_CHAIN_ID ? 'solana' : 'evm';
 
-    if (type === 'solana') {
+    if (isSolanaChain(chainId)) {
       const address = deriveSolanaAddress(mnemonic);
       return { address, type: 'solana' };
     } else {
@@ -42,7 +40,7 @@ export class Auth {
     const mnemonic = mnemonicOverride ?? getMnemonic();
     const chainId = getChainId();
 
-    if (chainId === SOLANA_CHAIN_ID) {
+    if (isSolanaChain(chainId)) {
       const keypair = deriveSolanaKeypair(mnemonic);
       transaction.sign([keypair]);
       return transaction.serialize().toString('base64');
@@ -56,7 +54,7 @@ export class Auth {
     const mnemonic = mnemonicOverride ?? getMnemonic();
     const chainId = getChainId();
 
-    if (chainId === SOLANA_CHAIN_ID) {
+    if (isSolanaChain(chainId)) {
       const keypair = deriveSolanaKeypair(mnemonic);
       const messageBytes = Buffer.from(message);
       const signature = nacl.sign.detached(messageBytes, keypair.secretKey);

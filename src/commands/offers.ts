@@ -97,7 +97,7 @@ offersCommand
     
     try {
       const chainId = typeof globalOpts.chainId === 'string' ? parseInt(globalOpts.chainId, 10) : (globalOpts.chainId ?? 666666);
-      const address = (options.address ?? auth.getAddress(undefined, chainId)).toLowerCase();
+      const address = (options.address ?? auth.getAddress(undefined, chainId));
       const params: any = {
         category_token: 'pre_market',
         is_by_me: true,
