@@ -7,6 +7,11 @@ export interface Token {
   status: string;
   price?: string | number;
   chain_id: number;
+  tge_oft_address?: string;
+  tge_network_id?: number;
+  tge_adapter_address?: string;
+  tge_native_adapter_address?: string;
+  tge_token_address?: string;
   [key: string]: any;
 }
 
